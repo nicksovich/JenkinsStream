@@ -13,8 +13,6 @@ import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import spray.json.DefaultJsonProtocol._
 
 import scala.concurrent.Future
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.util.{Failure, Success}
 
 class JenkinsClientImpl(jenkinsConfig: JenkinsConfig) extends JenkinsClient {
 

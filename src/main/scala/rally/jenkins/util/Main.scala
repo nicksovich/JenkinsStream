@@ -9,7 +9,7 @@ import scala.util.{Failure, Success}
 object Main extends App {
 
   val config = ConfigFactory.load
-  val jenkinsConfig = JenkinsConfig("https://ci.rally-dev.com", config.getString("username"), config.getString("token"))
+  val jenkinsConfig = JenkinsConfig(config.getString("url"), config.getString("username"), config.getString("token"))
   val jenkinsClient = new JenkinsClientImpl(jenkinsConfig)
   // https://ci.rally-dev.com/teams-deploys/queue/item/29331/api/json?pretty=true
   // https://ci.rally-dev.com/teams-deploys/queue/api/json?pretty=true
