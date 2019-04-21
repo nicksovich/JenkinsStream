@@ -1,67 +1,31 @@
 package rally.jenkins.util
 
-import akka.actor.ActorSystem
-import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.headers.{Accept, BasicHttpCredentials}
-import akka.http.scaladsl.model.{HttpMethods, HttpProtocols, HttpRequest, HttpResponse, MediaTypes}
-import akka.stream.ActorMaterializer
+import com.typesafe.config.ConfigFactory
+import rally.jenkins.util.model.JobInfo
 
-import scala.concurrent.Future
+import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{Failure, Success}
-import akka.http.scaladsl.unmarshalling.Unmarshal
-import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
-import com.typesafe.config.{Config, ConfigFactory}
-import spray.json.DefaultJsonProtocol._
 
 object Main extends App {
 
-  implicit val system = ActorSystem()
-  implicit val materializer = ActorMaterializer()
-  // needed for the future flatMap/onComplete in the end
-  implicit val executionContext = system.dispatcher
-
-  val baseJenkinsUrl = "https://ci.rally-dev.com"
-  def jobPath(job: String, branch: String) = s"teams-deploys/job/deploys/job/$job/job/$branch"
-  val lastBuild = "lastBuild/api/json"
-
-  val job = "CreateTenant"
-  val branch = "master"
-  val url = List(baseJenkinsUrl, jobPath(job, branch), lastBuild).mkString("/")
-  println(url)
-
   val config = ConfigFactory.load
-  val username = config.getString("username")
-  val password = config.getString("token")
+  val jenkinsConfig = JenkinsConfig("https://ci.rally-dev.com", config.getString("username"), config.getString("token"))
+  val jenkinsClient = new JenkinsClientImpl(jenkinsConfig)
+  // https://ci.rally-dev.com/teams-deploys/queue/item/29331/api/json?pretty=true
+  // https://ci.rally-dev.com/teams-deploys/queue/api/json?pretty=true
 
-  val credentials = BasicHttpCredentials(username, password)
+//  jenkinsClient.deployComponent("rewards-ui", "8.9.0", "clever-spring") map {
+//    case Left(queueId) =>
+//      Thread.sleep(5000)
+//      jenkinsClient.waitForJobToFinish(queueId) map {
+//      case Left(status) => println(status)
+//      case Right(error) => println(error)
+//    }
+//    case Right(i) => println(i)
+//  }
 
-  val request = HttpRequest(
-    method = HttpMethods.GET,
-    uri = url,
-    headers = List(Accept(MediaTypes.`application/json`)),
-    protocol = HttpProtocols.`HTTP/1.1`
-  )
-    .addCredentials(credentials)
-
-  val responseFuture: Future[HttpResponse] = Http().singleRequest(request)
-
-  case class JobInfo(building: Boolean, result: Option[String], queueId: Int, description: Option[String])
-  implicit val jobInfoFormat = jsonFormat4(JobInfo)
-
-  responseFuture
-    .onComplete {
-      case Success(res) =>
-        Unmarshal(res.entity).to[JobInfo].onComplete {
-          case Success(jobInfo) =>
-            println(jobInfo)
-            system.terminate()
-          case Failure(err) =>
-            sys.error(err.getMessage)
-            system.terminate()
-        }
-        system.terminate()
-      case Failure(_) =>
-        sys.error("something wrong")
-        system.terminate()
-    }
+  jenkinsClient.getLastNJobInfos("DeployComponent", 10).onComplete {
+    case Success(jobInfos) => println(jobInfos)
+    case Failure(ex) => println(ex.getMessage)
+  }
 }
