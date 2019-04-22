@@ -4,7 +4,6 @@ import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import com.typesafe.config.ConfigFactory
 
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{Failure, Success}
 
 object Main extends App {
@@ -18,24 +17,28 @@ object Main extends App {
 
   val jenkinsClient = new JenkinsClientImpl(jenkinsConfig)
 
-  system.terminate()
+  implicit val defaultHandler = JenkinsClient.continueOnNonSuccessfulBuild
 
-
-  // https://ci.rally-dev.com/teams-deploys/queue/item/29331/api/json?pretty=true
-  // https://ci.rally-dev.com/teams-deploys/queue/api/json?pretty=true
-
-
-//  val fut = jenkinsClient.getLastNJobInfos("DeployComponent", 10).onComplete {
-//    case Success(jobInfos) => println(jobInfos);
-//    case Failure(ex) => println(ex.getMessage);
+  (for {
+    createTenant <- jenkinsClient.createTenant("engage", "3 hours", "dev")(JenkinsClient.stopOnNonSuccessfulBuild)
+    tenant = createTenant.description
+    engageStack <- jenkinsClient.deployStack(tenant, "engage")(defaultHandler)
+    engineStack <- jenkinsClient.deployStack(tenant, "engine")(defaultHandler)
+    rewardsUI <- jenkinsClient.deployComponent("rewards-ui", "8.9.0", tenant)(defaultHandler)
+  } yield {
+    println(s"createTenant: $createTenant")
+    println(s"engageStack: $engageStack")
+    println(s"engineStack: $engineStack")
+    println(s"rewardsUI: $rewardsUI")
+    system.terminate()
+  }).recover {
+    case e: Exception =>
+      println(e.getMessage)
+      system.terminate()
+  }
+//
+//  jenkinsClient.deployComponent("rewards-ui", "8.9.0", "clever-spring") onComplete {
+//    case Success(buildInfo) => println(buildInfo)
+//    case Failure(ex) => println(ex.getMessage)
 //  }
-
-//  // start deployComponent job
-//  jenkinsClient.deployComponent("rewards-ui", "8.9.0", "clever-spring") map {
-//    case Left(queueId) =>
-//      // try to get buildId for at most 3 minutes
-//    case Right(i) => throw new Exception(s"deploy component failed because of $i")
-//  }
-
-
 }
