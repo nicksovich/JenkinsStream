@@ -2,23 +2,21 @@ package rally.jenkins.util
 
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
 import akka.http.scaladsl.model.headers.BasicHttpCredentials
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.ActorMaterializer
-import rally.jenkins.util.model.JobInfo
-import spray.json.DefaultJsonProtocol
+import rally.jenkins.util.model.{JobInfo, JobNumber}
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import spray.json.DefaultJsonProtocol._
 
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 
-class JenkinsClientImpl(jenkinsConfig: JenkinsConfig) extends JenkinsClient {
-
-  private implicit val system = ActorSystem()
-  private implicit val materializer = ActorMaterializer()
-  private implicit val executionContext = system.dispatcher
+class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
+  implicit val materializer: ActorMaterializer,
+  executionContext: ExecutionContext,
+  actorSystem: ActorSystem
+) extends JenkinsClient {
 
   private val credentials = BasicHttpCredentials(jenkinsConfig.username, jenkinsConfig.token)
 
@@ -86,12 +84,6 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig) extends JenkinsClient {
       uri = url
     ).addCredentials(credentials)
 
-    case class JobNumber(number: Int)
-    case object JobNumber extends SprayJsonSupport with DefaultJsonProtocol {
-
-      implicit val jobNumberFormat = jsonFormat1(JobNumber.apply)
-    }
-
     for {
       response <- Http().singleRequest(request)
       jobNumber <- Unmarshal(response).to[JobNumber]
@@ -110,23 +102,20 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig) extends JenkinsClient {
       uri = url
     ).addCredentials(credentials)
 
-    implicit val jobInfo = jsonFormat2(JobInfo)
+    implicit val jobInfo = jsonFormat3(JobInfo)
 
     for {
       response <- Http().singleRequest(request)
       jobInfo <- Unmarshal(response.entity).to[JobInfo]
-    } yield {
-      jobInfo
-    }
+    } yield jobInfo
   }
 
   def getLastNJobInfos(jobName: String, n: Int): Future[Seq[JobInfo]] = {
     for {
       lastJobInfo <- getLastJobInfo(jobName)
       lastNJobsInfos <- getJobsInfos(jobName, lastJobInfo.number - n, lastJobInfo.number)
-    } yield {
-      lastNJobsInfos
-    }
+    } yield lastNJobsInfos
+
   }
 
   def getJobInfo(jobName: String, buildNumber: Int): Future[JobInfo] = {
@@ -136,14 +125,12 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig) extends JenkinsClient {
       uri = url
     ).addCredentials(credentials)
 
-    implicit val jobInfo = jsonFormat2(JobInfo)
+    implicit val jobInfo = jsonFormat3(JobInfo)
 
     for {
       response <- Http().singleRequest(request)
       jobInfo <- Unmarshal(response.entity).to[JobInfo]
-    } yield {
-      jobInfo
-    }
+    } yield jobInfo
   }
 
   def getJobsInfos(jobName: String, startBuildNumber: Int, endBuildNumber: Int): Future[Seq[JobInfo]] = {
