@@ -14,7 +14,7 @@ trait JenkinsClient {
     * @param environment "dev" | "ci" | "cje-jenkins" | "int" | ...
     * @return information about how build went. Description field contains tenant-name
     */
-  def createTenant(stacks: String, lifespan: String, environment: String)
+  def createTenant(stacks: String, lifespan: String, environment: String, branch: String = "master")
     (implicit handler: BuildInfo => BuildInfo): Future[BuildInfo]
 
   /** https://ci.rally-dev.com/teams-deploys/job/deploys/job/DestroyTenant/job/<branch>/
@@ -23,7 +23,7 @@ trait JenkinsClient {
     * @param stack "engage" | "engine" | "arcade" | ...
     * @return information about how build went
     */
-  def deployStack(tenant: String, stack: String)(implicit handler: BuildInfo => BuildInfo): Future[BuildInfo]
+  def deployStack(tenant: String, stack: String, branch: String = "master")(implicit handler: BuildInfo => BuildInfo): Future[BuildInfo]
 
   /** https://ci.rally-dev.com/teams-deploys/job/deploys/job/DeployComponent/job/<branch>/
     *
@@ -32,7 +32,7 @@ trait JenkinsClient {
     * @param tenant Neptune tenant that was created by CreateTenant job
     * @return information about how build went
     */
-  def deployComponent(component: String, version: String, tenant: String)
+  def deployComponent(component: String, version: String, tenant: String, branch: String = "master")
     (implicit handler: BuildInfo => BuildInfo): Future[BuildInfo]
 
   /** https://ci.rally-dev.com/teams-deploys/job/deploys/job/DestroyTenant/job/<branch>/
@@ -40,7 +40,7 @@ trait JenkinsClient {
     * @param tenant Neptune tenant that was created by CreateTenant job
     * @return information about how build went
     */
-  def destroyTenant(tenant: String)(implicit handler: BuildInfo => BuildInfo): Future[BuildInfo]
+  def destroyTenant(tenant: String, branch: String = "master")(implicit handler: BuildInfo => BuildInfo): Future[BuildInfo]
 }
 
 object JenkinsClient {

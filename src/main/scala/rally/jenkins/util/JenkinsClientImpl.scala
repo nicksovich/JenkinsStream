@@ -29,27 +29,27 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
   // https://stackoverflow.com/questions/51638867/how-to-get-the-right-build-number-for-a-build-triggered-in-jenkins-by-remote-api
   private val runBuildWithParameters = "buildWithParameters"
 
-  def createTenant(stacks: String, lifespan: String, environment: String)
+  def createTenant(stacks: String, lifespan: String, environment: String, branch: String = "master")
     (implicit handler: BuildInfo => BuildInfo): Future[BuildInfo] = {
     val parameters = buildParams(Map("stacks" -> stacks, "lifespan" -> lifespan, "environment" -> environment))
-    runJob("CreateTenant", "master", parameters) map handler
+    runJob("CreateTenant", branch, parameters) map handler
   }
 
-  def deployStack(tenant: String, stack: String)
+  def deployStack(tenant: String, stack: String, branch: String = "master")
     (implicit handler: BuildInfo => BuildInfo): Future[BuildInfo] = {
     val parameters = buildParams(Map("tenant" -> tenant, "stack" -> stack))
-    runJob("DeployStack", "master", parameters) map handler
+    runJob("DeployStack", branch, parameters) map handler
   }
 
-  def deployComponent(component: String, version: String, tenant: String)
+  def deployComponent(component: String, version: String, tenant: String, branch: String = "master")
     (implicit handler: BuildInfo => BuildInfo): Future[BuildInfo] = {
     val parameters = buildParams(Map("component" -> component, "version" -> version, "tenant" -> tenant))
-    runJob("DeployComponent", "master", parameters) map handler
+    runJob("DeployComponent", branch, parameters) map handler
   }
 
-  def destroyTenant(tenant: String)(implicit handler: BuildInfo => BuildInfo): Future[BuildInfo] = {
+  def destroyTenant(tenant: String, branch: String = "master")(implicit handler: BuildInfo => BuildInfo): Future[BuildInfo] = {
     val parameters = buildParams(Map("tenant" -> tenant))
-    runJob("DestroyTenant", "master", parameters) map handler
+    runJob("DestroyTenant", branch, parameters) map handler
   }
 
   private def runJob(jobName: String, jobBranch: String, parameters: String): Future[BuildInfo] = {
@@ -57,7 +57,7 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
     (for {
       queueId <- triggerJob(jobName, jobBranch, parameters, runBuildWithParameters)
       _ <- Future { println(queueId) }
-      buildInfo <- waitForJobToFinish(jobName, queueId)
+      buildInfo <- waitForJobToFinish(jobName, queueId, jobBranch)
       _ <- Future {
         println(buildInfo)
       }
@@ -102,10 +102,10 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
   when I'm not sleep deprived.
    */
 
-  private def waitForJobToFinish(jobName: String, queueLink: String): Future[BuildInfo] = {
+  private def waitForJobToFinish(jobName: String, queueLink: String, branch: String): Future[BuildInfo] = {
     implicit val jobNumberFormat = jsonFormat1(JobNumber.apply)
     val maxAttempts = 360
-    val timeBetweenAttempts = 5000
+    val timeBetweenAttempts = 10000
     // extract the number queueId from queueId link
     val splitQueueLink = queueLink.split("/")
     val queueId = splitQueueLink(splitQueueLink.length - 1).toInt
@@ -113,7 +113,7 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
     var attempts = 0
     var buildId: Option[RawBuildInfo] = None
     while (attempts < maxAttempts && buildId.isEmpty) {
-      val last10JobInfos = Await.result(getLastNJobInfos(jobName, 10), 10 seconds)
+      val last10JobInfos = Await.result(getLastNJobInfos(jobName, 10, branch), 10 seconds)
       buildId = last10JobInfos.find(b => b.queueId == queueId)
       if (buildId.isEmpty) {
         println("waiting for build to start...")
@@ -157,9 +157,9 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
     Future(buildInfo.get)
   }
 
-  private def getLastJobInfo(jobName: String): Future[BuildInfo] = {
+  private def getLastJobInfo(jobName: String, branch: String): Future[BuildInfo] = {
     println("getLastJobInfo")
-    val url = List(jenkinsConfig.baseURL, jobPath(jobName, "master"), lastBuild).mkString("/")
+    val url = List(jenkinsConfig.baseURL, jobPath(jobName, branch), lastBuild).mkString("/")
     val request = HttpRequest(
       method = HttpMethods.GET,
       uri = url
@@ -177,10 +177,10 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
     }
   }
 
-  private def getLastNJobInfos(jobName: String, n: Int): Future[Seq[RawBuildInfo]] = {
+  private def getLastNJobInfos(jobName: String, n: Int, branch: String): Future[Seq[RawBuildInfo]] = {
     println("getLastNJobInfos")
     for {
-      lastJobInfo <- getLastJobInfo(jobName)
+      lastJobInfo <- getLastJobInfo(jobName, branch)
       lastNJobsInfos <- getJobsInfos(jobName, lastJobInfo.buildId - n, lastJobInfo.buildId)
     } yield lastNJobsInfos
 
