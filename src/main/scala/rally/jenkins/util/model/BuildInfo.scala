@@ -4,9 +4,10 @@ import rally.jenkins.util.enum.{BuildResult, JobName}
 
 /**
   *
-  * @param buildId            build number of job
-  * @param result            "SUCCESS" | "FAILURE" | "ABORTED"
-  * @param description       text specific to the job. Only meaningful for CreateTenant, as it represents the tenant name
+  * @param jobName     "CreateTenant" | "DeployStack" | "DeployComponent" | ...
+  * @param buildId     build number of job
+  * @param result      "SUCCESS" | "FAILURE" | "ABORTED"
+  * @param description text specific to the job. Only meaningful for CreateTenant, as it represents the tenant name
   */
 
 case class BuildInfo(

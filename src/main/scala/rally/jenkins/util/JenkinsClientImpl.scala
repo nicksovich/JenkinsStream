@@ -10,6 +10,7 @@ import rally.jenkins.util.model.{BuildInfo, JobNumber, RawBuildInfo}
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import rally.jenkins.util.enum.{BuildAborted, BuildFailure, BuildResult, BuildSuccess, JobName}
 import spray.json.DefaultJsonProtocol._
+import spray.json.RootJsonFormat
 
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext, Future}
@@ -20,13 +21,10 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
   actorSystem: ActorSystem
 ) extends JenkinsClient {
 
-  type QueueId = String
-
   private val credentials = BasicHttpCredentials(jenkinsConfig.username, jenkinsConfig.token)
 
   private val lastBuild = "lastBuild/api/json"
   private val buildInfo = "api/json"
-  // https://stackoverflow.com/questions/51638867/how-to-get-the-right-build-number-for-a-build-triggered-in-jenkins-by-remote-api
   private val runBuildWithParameters = "buildWithParameters"
 
   def createTenant(stacks: String, lifespan: String, environment: String, branch: String = "master")
@@ -69,7 +67,7 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
       }
   }
 
-  private def triggerJob(jobName: String, jobBranch: String, parameters: String, jobType: String): Future[QueueId] = {
+  private def triggerJob(jobName: String, jobBranch: String, parameters: String, jobType: String): Future[String] = {
     val url = List(jenkinsConfig.baseURL, jobPath(jobName, jobBranch), jobType).mkString("/")
     val urlWithParams = s"$url?$parameters"
     println(urlWithParams)
@@ -103,7 +101,7 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
    */
 
   private def waitForJobToFinish(jobName: String, queueLink: String, branch: String): Future[BuildInfo] = {
-    implicit val jobNumberFormat = jsonFormat1(JobNumber.apply)
+    implicit val jobNumberFormat: RootJsonFormat[JobNumber] = jsonFormat1(JobNumber.apply)
     val maxAttempts = 360
     val timeBetweenAttempts = 10000
     // extract the number queueId from queueId link
@@ -111,11 +109,11 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
     val queueId = splitQueueLink(splitQueueLink.length - 1).toInt
 
     var attempts = 0
-    var buildId: Option[RawBuildInfo] = None
-    while (attempts < maxAttempts && buildId.isEmpty) {
-      val last10JobInfos = Await.result(getLastNJobInfos(jobName, 10, branch), 10 seconds)
-      buildId = last10JobInfos.find(b => b.queueId == queueId)
-      if (buildId.isEmpty) {
+    var rawBuildInfo: Option[RawBuildInfo] = None
+    while (attempts < maxAttempts && rawBuildInfo.isEmpty) {
+      val last10JobInfos = Await.result(getLastNJobInfos(jobName, 10, branch), 10.seconds)
+      rawBuildInfo = last10JobInfos.find(b => b.queueId == queueId)
+      if (rawBuildInfo.isEmpty) {
         println("waiting for build to start...")
         Thread.sleep(timeBetweenAttempts) // sleep for a second
         attempts += 1
@@ -125,10 +123,10 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
     attempts = 0
     var buildInfo: Option[BuildInfo] = None
     while (attempts < maxAttempts && buildInfo.isEmpty) {
-      buildId match {
+      rawBuildInfo match {
         case Some(RawBuildInfo(_, _, _, buildId, _, _)) =>
           println(s"Trying to get job for buildId $buildId")
-          val rawBuildInfo: RawBuildInfo = Await.result(getJobInfo(jobName, buildId), 10 seconds)
+          val rawBuildInfo: RawBuildInfo = Await.result(getJobInfo(jobName, buildId), 10.seconds)
           println(s"Got raw build info: $rawBuildInfo")
           rawBuildInfo.result match {
             case Some(result) if List(BuildSuccess, BuildFailure, BuildAborted).map(_.toString)
@@ -140,17 +138,15 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
                 rawBuildInfo.description.getOrElse("")
               )
             )
-            case None => {
+            case None =>
               println("waiting for build to finish...")
               Thread.sleep(timeBetweenAttempts) // sleep for a second
               attempts += 1
-            }
           }
-        case None => {
+        case None =>
           println("waiting for build to finish...")
           Thread.sleep(timeBetweenAttempts) // sleep for a second
           attempts += 1
-        }
       }
     }
 
@@ -165,7 +161,7 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
       uri = url
     ).addCredentials(credentials)
 
-    implicit val jobInfo = jsonFormat6(RawBuildInfo)
+    implicit val jobInfo: RootJsonFormat[RawBuildInfo] = jsonFormat6(RawBuildInfo)
     println(url)
 
     for {
@@ -194,7 +190,7 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
       uri = url
     ).addCredentials(credentials)
     println(url)
-    implicit val rawJobInfo = jsonFormat6(RawBuildInfo)
+    implicit val rawJobInfo: RootJsonFormat[RawBuildInfo] = jsonFormat6(RawBuildInfo)
 
     for {
       response <- Http().singleRequest(request)
