@@ -51,7 +51,7 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
   }
 
   private def runJob(jobName: String, jobBranch: String, parameters: String): Future[BuildInfo] = {
-    println(s"Running job $jobName with params: $parameters")
+    println(s"\nRunning job $jobName with params: $parameters on branch $jobBranch")
     (for {
       queueId <- triggerJob(jobName, jobBranch, parameters, runBuildWithParameters)
       _ <- Future { println(queueId) }
@@ -70,7 +70,6 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
   private def triggerJob(jobName: String, jobBranch: String, parameters: String, jobType: String): Future[String] = {
     val url = List(jenkinsConfig.baseURL, jobPath(jobName, jobBranch), jobType).mkString("/")
     val urlWithParams = s"$url?$parameters"
-    println(urlWithParams)
     val request = HttpRequest(
       method = HttpMethods.POST,
       uri = urlWithParams,
@@ -109,25 +108,25 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
     val queueId = splitQueueLink(splitQueueLink.length - 1).toInt
 
     var attempts = 0
+    println("\nwaiting for build to start")
     var rawBuildInfo: Option[RawBuildInfo] = None
     while (attempts < maxAttempts && rawBuildInfo.isEmpty) {
       val last10JobInfos = Await.result(getLastNJobInfos(jobName, 10, branch), 10.seconds)
       rawBuildInfo = last10JobInfos.find(b => b.queueId == queueId)
       if (rawBuildInfo.isEmpty) {
-        println("waiting for build to start...")
+        print(".")
         Thread.sleep(timeBetweenAttempts) // sleep for a second
         attempts += 1
       }
     }
 
     attempts = 0
+    println("\nwaiting for build to finish")
     var buildInfo: Option[BuildInfo] = None
     while (attempts < maxAttempts && buildInfo.isEmpty) {
       rawBuildInfo match {
         case Some(RawBuildInfo(_, _, _, buildId, _, _)) =>
-          println(s"Trying to get job for buildId $buildId")
-          val rawBuildInfo: RawBuildInfo = Await.result(getJobInfo(jobName, buildId), 10.seconds)
-          println(s"Got raw build info: $rawBuildInfo")
+          val rawBuildInfo: RawBuildInfo = Await.result(getJobInfo(jobName, buildId, branch), 10.seconds)
           rawBuildInfo.result match {
             case Some(result) if List(BuildSuccess, BuildFailure, BuildAborted).map(_.toString)
               .contains(result) => buildInfo = Some(
@@ -139,12 +138,12 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
               )
             )
             case None =>
-              println("waiting for build to finish...")
+              print(".")
               Thread.sleep(timeBetweenAttempts) // sleep for a second
               attempts += 1
           }
         case None =>
-          println("waiting for build to finish...")
+          print(".")
           Thread.sleep(timeBetweenAttempts) // sleep for a second
           attempts += 1
       }
@@ -154,7 +153,6 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
   }
 
   private def getLastJobInfo(jobName: String, branch: String): Future[BuildInfo] = {
-    println("getLastJobInfo")
     val url = List(jenkinsConfig.baseURL, jobPath(jobName, branch), lastBuild).mkString("/")
     val request = HttpRequest(
       method = HttpMethods.GET,
@@ -162,7 +160,6 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
     ).addCredentials(credentials)
 
     implicit val jobInfo: RootJsonFormat[RawBuildInfo] = jsonFormat6(RawBuildInfo)
-    println(url)
 
     for {
       response <- Http().singleRequest(request)
@@ -174,22 +171,18 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
   }
 
   private def getLastNJobInfos(jobName: String, n: Int, branch: String): Future[Seq[RawBuildInfo]] = {
-    println("getLastNJobInfos")
     for {
       lastJobInfo <- getLastJobInfo(jobName, branch)
-      lastNJobsInfos <- getJobsInfos(jobName, lastJobInfo.buildId - n, lastJobInfo.buildId)
+      lastNJobsInfos <- getJobsInfos(jobName, if (lastJobInfo.buildId - n <= 0) 1 else lastJobInfo.buildId - n, lastJobInfo.buildId, branch)
     } yield lastNJobsInfos
-
   }
 
-  private def getJobInfo(jobName: String, buildNumber: Int): Future[RawBuildInfo] = {
-    println("getJobInfo")
-    val url = List(jenkinsConfig.baseURL, jobPath(jobName, "master"), buildNumber.toString, buildInfo).mkString("/")
+  private def getJobInfo(jobName: String, buildNumber: Int, branch: String): Future[RawBuildInfo] = {
+    val url = List(jenkinsConfig.baseURL, jobPath(jobName, branch), buildNumber.toString, buildInfo).mkString("/")
     val request = HttpRequest(
       method = HttpMethods.GET,
       uri = url
     ).addCredentials(credentials)
-    println(url)
     implicit val rawJobInfo: RootJsonFormat[RawBuildInfo] = jsonFormat6(RawBuildInfo)
 
     for {
@@ -198,9 +191,8 @@ class JenkinsClientImpl(jenkinsConfig: JenkinsConfig)(
     } yield jobInfo
   }
 
-  private def getJobsInfos(jobName: String, startBuildNumber: Int, endBuildNumber: Int): Future[Seq[RawBuildInfo]] = {
-    println("getJobInfos")
-    val jobInfo = (number: Int) => getJobInfo(jobName, number)
+  private def getJobsInfos(jobName: String, startBuildNumber: Int, endBuildNumber: Int, branch: String): Future[Seq[RawBuildInfo]] = {
+    val jobInfo = (number: Int) => getJobInfo(jobName, number, branch)
     val jobInfos = startBuildNumber to endBuildNumber map jobInfo
     Future.sequence(jobInfos)
   }

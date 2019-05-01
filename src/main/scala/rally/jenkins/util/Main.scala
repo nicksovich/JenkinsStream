@@ -1,38 +1,41 @@
 package rally.jenkins.util
 
-import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
-import com.typesafe.config.ConfigFactory
-import rally.jenkins.util.model.BuildInfo
+import akka.Done
+import akka.http.scaladsl.Http
+import script.{ActiveAndSyncSetup, Manifest => Man}
+import akka.http.scaladsl.model._
+import akka.http.scaladsl.server.Directives._
 
-import scala.concurrent.ExecutionContext
+import scala.concurrent.Future
+import scala.io.StdIn
 
-object Main extends App {
+object Main extends App with Context {
 
-  val config = ConfigFactory.load
-  val jenkinsConfig = JenkinsConfig(config.getString("url"), config.getString("username"), config.getString("token"))
+  val route =
+    path("manifest") {
+      post {
+        entity(as[String]) { tenant =>
+          val saved: Future[Done] = new Man(tenant).run
+          onComplete(saved) { _ =>
+            complete(StatusCodes.OK)
+          }
+        }
+      }
+    } ~
+    path("activeAndSync") {
+      post {
+        val saved: Future[Done] = new ActiveAndSyncSetup().run
+        onComplete(saved) { _ =>
+          complete(StatusCodes.OK)
+        }
+      }
+    }
 
-  private implicit val system: ActorSystem = ActorSystem()
-  private implicit val materializer: ActorMaterializer = ActorMaterializer()
-  private implicit val executionContext: ExecutionContext = system.dispatcher
+  val bindingFuture = Http().bindAndHandle(route, "localhost", 8080)
 
-  val jenkinsClient = new JenkinsClientImpl(jenkinsConfig)
-
-  implicit val defaultHandler: BuildInfo => BuildInfo = JenkinsClient.continueOnNonSuccessfulBuild
-
-  (for {
-    createTenant <- jenkinsClient.createTenant("engage", "3 hours", "dev")(JenkinsClient.stopOnNonSuccessfulBuild)
-    tenant = createTenant.description
-    engageStack <- jenkinsClient.deployStack(tenant, "engage")
-    engineStack <- jenkinsClient.deployStack(tenant, "engine")
-  } yield {
-    println(s"createTenant: $createTenant")
-    println(s"engageStack: $engageStack")
-    println(s"engineStack: $engineStack")
-    system.terminate()
-  }).recover {
-    case e: Exception =>
-      println(e.getMessage)
-      system.terminate()
-  }
+  println(s"Server online at http://localhost:8080/\nPress RETURN to stop...")
+  StdIn.readLine() // let it run until user presses return
+  bindingFuture
+    .flatMap(_.unbind()) // trigger unbinding from the port
+    .onComplete(_ => system.terminate()) // and shutdown when done
 }
