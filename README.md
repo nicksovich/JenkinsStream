@@ -71,7 +71,7 @@ functional environment that you can rely on and is cheaper.
 
 Motto: Anything you need to do manually and repeatedly, should be done automatically.
 
-## Implemnation
+## Implementation
 
 So what does this look like in practice? You can take a look at the `scripts` package. But essentially,
 the code will end up being a large for-comprehension. It is trivial to encode build steps:
